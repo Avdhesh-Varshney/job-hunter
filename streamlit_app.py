@@ -15,24 +15,27 @@ A personalized app designed to help job seekers manage their HR contacts, compan
 @st.cache_resource
 def connectingServer():
   gdown.download(f"https://drive.google.com/uc?id={st.secrets['JOB_DATA']}", f'job_data.csv', quiet=False)
-  gdown.download(f"https://drive.google.com/uc?id={st.secrets['SERVICE_ACCOUNT_FILE']}", 'credentials.json', quiet=False)
-
   data = pd.read_csv("job_data.csv")
+  return data
+
+@st.cache_resource
+def getDriveService():
+  gdown.download(f"https://drive.google.com/uc?id={st.secrets['SERVICE_ACCOUNT_FILE']}", 'credentials.json', quiet=False)
   SCOPES = ['https://www.googleapis.com/auth/drive']
   creds = service_account.Credentials.from_service_account_file('credentials.json', scopes=SCOPES)
   service = build('drive', 'v3', credentials=creds)
+  return service
 
-  return data, service
-
-def saveData(service, data, info, new_row):
+def saveData(data, info, new_row):
   index = data.index[(data['hr_name'] == info['hr_name']) & (data['company_name'] == info['company_name'])].tolist()[0]
   data.loc[index] = new_row.iloc[0]
   data.to_csv('job_data.csv', index=False)
   try:
+    service = getDriveService()
     media = MediaFileUpload('job_data.csv', mimetype='application/csv', resumable=True)
     request = service.files().update(fileId=st.secrets['JOB_DATA'], media_body=media, body={'mimeType': 'application/csv'})
     response = request.execute()
-    st.success("File updated successfully!")
+    st.success("File updated successfully!", icon="✅")
     return response
   except Exception as e:
     st.error(f"An error occurred while uploading: {e}", icon="🚫")
@@ -56,7 +59,7 @@ def analyzeCompanyData(data):
   top_niches = company_niche.head(10)
   st.bar_chart(top_niches)
 
-def information(data, service):
+def information(data):
   st.subheader("Company/HR Contact Information")
   category = st.radio("Filter data based on:", ['HR', 'Company'])
   if category == 'HR':
@@ -118,32 +121,36 @@ def information(data, service):
 
   else:
     my_status = st.selectbox("My Status", ['No Openings', 'Invitation Sent', 'In Talks'])
+    applied_for_job = st.checkbox("Have you applied for internship or job?")
     my_linkedin_status = st.checkbox("Have you contact HR/Company on LinkedIn?")
     my_twitter_status = st.checkbox("Have you contact HR/Company on Twitter?")
     my_facebook_status = st.checkbox("Have you contact HR/Company on Facebook?")
-    applied_for_job = st.checkbox("Have you applied for internship or job?")
 
+    secret_key = st.number_input("Enter the secret key", min_value=1000, max_value=9999, step=1, placeholder=1000)
     if st.button("Save Details", key="save_btn"):
-      st.session_state.edit = True
-      new_row = pd.DataFrame([{
-        'hr_name': name, 'hr_job_title': new_job_title, 'hr_email': new_email, 'hr_phone': new_phone,
-        'hr_linkedin_username': new_linkedin_username, 'hr_twitter_username': new_twitter_username,
-        'hr_facebook_username': new_facebook_username, 'company_name': new_company_name,
-        'company_website': new_company_website, 'company_email': new_company_email,
-        'company_linkedin_username': new_company_linkedin_username, 'company_twitter_username': new_company_twitter_username,
-        'company_facebook_username': new_company_facebook_username, 'company_location': new_company_location,
-        'company_niche': new_company_niche, 'status': my_status, 'job_status': applied_for_job, 
-        'linkedin_status': my_linkedin_status, 'twitter_status': my_twitter_status, 'facebook_status': my_facebook_status
-      }])
-      st.toast("Form Submitted Successfully.", icon="✅")
-      time.sleep(1)
-      response = saveData(service, data, info, new_row)
-      if response is not None:
-        st.toast("Data Saved Successfully!", icon="✅")
+      if secret_key == st.secrets['SECRET_KEY']:
+        st.session_state.edit = True
+        new_row = pd.DataFrame([{
+          'hr_name': name, 'hr_job_title': new_job_title, 'hr_email': new_email, 'hr_phone': new_phone,
+          'hr_linkedin_username': new_linkedin_username, 'hr_twitter_username': new_twitter_username,
+          'hr_facebook_username': new_facebook_username, 'company_name': new_company_name,
+          'company_website': new_company_website, 'company_email': new_company_email,
+          'company_linkedin_username': new_company_linkedin_username, 'company_twitter_username': new_company_twitter_username,
+          'company_facebook_username': new_company_facebook_username, 'company_location': new_company_location,
+          'company_niche': new_company_niche, 'status': my_status, 'job_status': applied_for_job, 
+          'linkedin_status': my_linkedin_status, 'twitter_status': my_twitter_status, 'facebook_status': my_facebook_status
+        }])
+        st.toast("Form Submitted Successfully.", icon="✅")
+        time.sleep(1)
+        response = saveData(data, info, new_row)
+        if response is not None:
+          st.toast("Data Saved Successfully!", icon="✅")
+        else:
+          st.toast("Data is not Saved!", icon="🚨")
+        time.sleep(2)
+        st.rerun()
       else:
-        st.toast("Data is not Saved!", icon="🚨")
-      time.sleep(2)
-      st.rerun()
+        st.toast("Invalid Key!", icon="🚨")
 
 def myStatus(data):
   st.subheader("My Status")
@@ -206,14 +213,14 @@ def myStatus(data):
     st.toast("No Data Found!", icon="🚨")
     st.error("No Data Found!", icon="🚨")
 
-def startApp(data, service):
+def startApp(data):
   st.sidebar.title("Job Hunter Pro")
-  options = ["My Status", "Company/HR Information", "Company Insights"]
+  options = ["Company/HR Information", "My Status", "Company Insights"]
   choice = st.sidebar.selectbox("Select an option", options)
-  if choice == "My Status":
+  if choice == "Company/HR Information":
+    information(data)
+  elif choice == "My Status":
     myStatus(data)
-  elif choice == "Company/HR Information":
-    information(data, service)
   elif choice == "Company Insights":
     analyzeCompanyData(data)
 
@@ -223,15 +230,15 @@ if __name__ == '__main__':
   if 'edit' not in st.session_state:
     st.session_state.edit = True
 
-  data, service = connectingServer()
+  data = connectingServer()
   if st.session_state.valid:
-    startApp(data, service)
+    startApp(data)
   else:
     st.title("Job Hunter Pro Application")
     st.write(aboutApp)
-    key = st.number_input('Enter a valid key', min_value=1000, max_value=9999, step=1, placeholder=1000)
+    key = st.number_input('Enter a valid password', min_value=1000, max_value=9999, step=1, placeholder=1000)
     if st.button('Start App'):
-      if key == st.secrets['KEY']:
+      if key in st.secrets['PASSWORDS']:
         st.session_state.valid = True
         st.toast("Login Successful!", icon="✅")
         st.balloons()
